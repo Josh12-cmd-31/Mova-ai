@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { CreativeMode, Message, ChatSession } from './types';
 import ChatMessage from './components/ChatMessage';
@@ -19,7 +18,6 @@ declare global {
 
   interface Window {
     Canva: any;
-    // Removed readonly to ensure compatibility with other declarations in the environment.
     aistudio: AIStudio;
   }
 }
@@ -243,7 +241,6 @@ const App: React.FC = () => {
           }]
         }));
         for await (const chunk of stream) {
-          // Explicitly use GenerateContentResponse to access the text property as per guidelines
           const c = chunk as GenerateContentResponse;
           assistantContent += c.text;
           setSession(prev => {
@@ -483,8 +480,8 @@ const App: React.FC = () => {
                     <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 flex items-center gap-3">
                        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
                        <div>
-                         <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Netlify Ready</p>
-                         <p className="text-[9px] text-slate-500 leading-tight">Environment Config Detected</p>
+                         <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Netlify Active</p>
+                         <p className="text-[9px] text-slate-500 leading-tight">Project is optimized for cloud deployment</p>
                        </div>
                     </div>
                   </div>
@@ -495,7 +492,7 @@ const App: React.FC = () => {
                     rel="noopener noreferrer"
                     className="w-full mb-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 border border-slate-700/50"
                   >
-                    <i className="fa-solid fa-credit-card"></i> Billing Setup
+                    <i className="fa-solid fa-credit-card"></i> API Billing Info
                   </a>
 
                   <button 
