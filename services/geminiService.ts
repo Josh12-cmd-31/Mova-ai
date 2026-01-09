@@ -20,28 +20,22 @@ MODES:
 1. SONG MODE: 
    - Output format: Intro – Verse – Pre-Chorus – Chorus – Verse 2 – Bridge – Chorus – Outro.
    - Include emotional lyrics and specific performance direction.
-   - If not specified, ask for: Language, Mood, Beat style, and Artist inspiration.
 
 2. SCRIPT MODE: 
    - Provide: Scene breakdown, Dialogue, Camera direction, Emotional cues.
-   - Automatically suggest appropriate scene transitions (e.g., CUT TO:, FADE OUT:, DISSOLVE TO:) between scenes to improve flow.
-   - Optimized for TikTok, YouTube, or movies.
 
 3. STORY MODE: 
    - Deliver: Strong hook, deep emotion, moral or lesson.
-   - Use short paragraphs optimized for mobile reading.
 
 4. IMAGE PROMPT / IMAGE GEN MODE: 
    - You are a visual production master.
-   - When generating or editing images, you MUST create a text prompt in this EXACT format for the internal engine: 
-     [Main character description] + [scene] + [emotion] + [lighting] + [camera style] + [quality]
-   - If a reference image is provided, NEVER change the person's face, features, or identity. 
-   - Your goal is to create viral-worthy, high-impact visuals.
+   - If a reference image is provided, you are in EDITING MODE. 
+   - Your goal is to apply the user's requested modifications while STRICTLY maintaining the composition, character identity, and core features of the original image.
+   - If no image is provided, you are in CREATION MODE. Generate a new visual based on the prompt.
+   - Format: [Main character/subject] + [action/scene] + [modified elements] + [lighting/style] + [high quality tags].
 
 5. Q&A MODE: 
-   - Answer clearly, step-by-step.
-   - Include real-world examples and a dedicated "Practical Actions" section.
-   - Ensure responses are actionable and easy to follow.
+   - Answer clearly, step-by-step with practical actions.
 
 Current Mode: {{MODE}}
 `;
@@ -75,7 +69,6 @@ export async function generateMovaImage(prompt: string, base64Image?: string, mi
   const parts: any[] = [{ text: prompt }];
   
   if (base64Image && mimeType) {
-    // Extract base64 data if it includes the data URI prefix
     const base64Data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
     parts.unshift({
       inlineData: {
@@ -85,7 +78,6 @@ export async function generateMovaImage(prompt: string, base64Image?: string, mi
     });
   }
 
-  // Always use generateContent for nano banana series models
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash-image',
     contents: { parts: parts },

@@ -1,18 +1,17 @@
-
 import React from 'react';
 import { Message, CreativeMode } from '../types';
 
 interface ChatMessageProps {
   message: Message;
+  onRefine?: (imageUrl: string) => void;
 }
 
-const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
+const ChatMessage: React.FC<ChatMessageProps> = ({ message, onRefine }) => {
   const isAI = message.role === 'assistant';
 
   const formatContent = (text: string) => {
     if (!text) return null;
     return text.split('\n').map((line, i) => {
-      // Check for bullet points or numbered lists
       const isListItem = line.trim().startsWith('- ') || line.trim().startsWith('* ') || /^\d+\.\s/.test(line.trim());
       
       return (
@@ -52,7 +51,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
           {message.attachmentUrl && (
             <div className="mb-3 rounded-2xl overflow-hidden border border-slate-800 shadow-xl max-w-sm group relative">
               <img src={message.attachmentUrl} alt="Attached" className="w-full h-auto block" />
-              <div className="absolute top-2 left-2 bg-black/50 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-bold text-white uppercase tracking-widest">User Asset</div>
+              <div className="absolute top-2 left-2 bg-black/50 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-bold text-white uppercase tracking-widest">Source Asset</div>
             </div>
           )}
 
@@ -68,7 +67,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                   <a href={message.imageUrl} download="mova-creative.png" className="w-10 h-10 bg-black/60 backdrop-blur-xl border border-white/10 rounded-full flex items-center justify-center text-white hover:bg-indigo-600 transition-all">
                     <i className="fa-solid fa-download"></i>
                   </a>
-                  <button className="w-10 h-10 bg-black/60 backdrop-blur-xl border border-white/10 rounded-full flex items-center justify-center text-white hover:bg-indigo-600 transition-all">
+                  <button 
+                    onClick={() => onRefine?.(message.imageUrl!)}
+                    className="w-10 h-10 bg-black/60 backdrop-blur-xl border border-white/10 rounded-full flex items-center justify-center text-white hover:bg-indigo-500 transition-all"
+                    title="Edit/Refine Image"
+                  >
                     <i className="fa-solid fa-wand-magic-sparkles"></i>
                   </button>
                 </div>

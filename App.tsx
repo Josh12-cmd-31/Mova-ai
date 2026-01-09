@@ -1,38 +1,29 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { CreativeMode, Message, ChatSession } from './types';
 import ChatMessage from './components/ChatMessage';
 import ChatInput from './components/ChatInput';
-import Login from './components/Login';
+import CreativeCanvas from './components/CreativeCanvas';
 import { streamMovaContent, generateMovaImage } from './services/geminiService';
-import { auth, logout } from './services/firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
 import { v4 as uuidv4 } from 'uuid';
 
 const MOVA_WELCOME_GREETING = "Hello, I'm MOVA.";
 const MOVA_SUB_GREETING = "How may I help you?";
 
 const App: React.FC = () => {
-  const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
   const [session, setSession] = useState<ChatSession>({
     id: uuidv4(),
     title: 'New Creative Session',
     messages: [],
-    currentMode: CreativeMode.GENERAL
+    currentMode: CreativeMode.GENERAL,
+    canvasContent: ''
   });
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<'chat' | 'canvas'>('chat');
+  const [viewMode, setViewMode] = useState<'chat' | 'canvas' | 'gallery'>('chat');
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [pendingRefinement, setPendingRefinement] = useState<{ data: string, type: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setAuthLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -41,10 +32,12 @@ const App: React.FC = () => {
   }, [session.messages]);
 
   const handleSendMessage = async (text: string, attachment?: { data: string, type: string }) => {
+    const isDocMode = session.currentMode === CreativeMode.SCRIPT || session.currentMode === CreativeMode.STORY;
+    
     const userMessage: Message = {
       id: uuidv4(),
       role: 'user',
-      content: text,
+      content: text || (attachment ? "Refine this image..." : ""),
       mode: session.currentMode,
       timestamp: new Date(),
       attachmentUrl: attachment?.data
@@ -55,29 +48,40 @@ const App: React.FC = () => {
       messages: [...prev.messages, userMessage],
     }));
     setIsLoading(true);
+    setPendingRefinement(null);
 
     try {
       if (session.currentMode === CreativeMode.IMAGE_PROMPT || attachment) {
-        const result = await generateMovaImage(text || "Create a stunning visual masterpiece based on the current context.", attachment?.data, attachment?.type);
+        const result = await generateMovaImage(
+          text || "Enhance visual.", 
+          attachment?.data, 
+          attachment?.type || 'image/png'
+        );
         
         setSession(prev => ({
           ...prev,
           messages: [...prev.messages, {
             id: uuidv4(),
             role: 'assistant',
-            content: result.textContent || "Your creative vision has been realized.",
+            content: result.textContent || "Refinement complete.",
             imageUrl: result.imageUrl,
             mode: session.currentMode,
             timestamp: new Date()
           }]
         }));
       } else {
+        // Prepare context for Gemini
         const history = session.messages.map(m => ({
           role: m.role === 'assistant' ? 'model' : 'user',
           parts: [{ text: m.content }]
         }));
 
-        const stream = await streamMovaContent(text, session.currentMode, history);
+        // If in document mode, provide the current canvas as context
+        const prompt = isDocMode 
+          ? `CURRENT DOCUMENT CONTENT:\n${session.canvasContent}\n\nUSER REQUEST: ${text}`
+          : text;
+
+        const stream = await streamMovaContent(prompt, session.currentMode, history);
         
         const assistantId = uuidv4();
         let assistantContent = '';
@@ -96,22 +100,37 @@ const App: React.FC = () => {
         for await (const chunk of stream) {
           const c = chunk as any;
           assistantContent += c.text;
-          setSession(prev => ({
-            ...prev,
-            messages: prev.messages.map(m => 
+          
+          setSession(prev => {
+            const updatedMessages = prev.messages.map(m => 
               m.id === assistantId ? { ...m, content: assistantContent } : m
-            )
-          }));
+            );
+            
+            // Auto-update canvas if in document mode
+            let updatedCanvas = prev.canvasContent;
+            if (isDocMode) {
+                // Heuristic: If it looks like a large text generation, update canvas
+                if (assistantContent.length > 50) {
+                    updatedCanvas = assistantContent;
+                }
+            }
+
+            return {
+              ...prev,
+              messages: updatedMessages,
+              canvasContent: updatedCanvas
+            };
+          });
         }
       }
     } catch (error: any) {
-      console.error('Error calling Gemini:', error);
+      console.error('Error:', error);
       setSession(prev => ({
         ...prev,
         messages: [...prev.messages, {
           id: uuidv4(),
           role: 'assistant',
-          content: `I hit a snag: ${error.message || 'Please try again.'}`,
+          content: `Error: ${error.message}`,
           mode: session.currentMode,
           timestamp: new Date()
         }]
@@ -121,10 +140,39 @@ const App: React.FC = () => {
     }
   };
 
+  const handleCanvasAction = (action: string, context: string) => {
+    let prompt = "";
+    switch(action) {
+        case 'REWRITE': prompt = `Rewrite this specific section to be more dramatic: "${context}"`; break;
+        case 'EXPAND': prompt = `Add more detail and sensory description to this section: "${context}"`; break;
+        case 'CONTINUE': prompt = `Continue the story/script from where it left off.`; break;
+    }
+    handleSendMessage(prompt);
+  };
+
+  const handleRefineAction = (imageUrl: string) => {
+    setPendingRefinement({ data: imageUrl, type: 'image/png' });
+    setViewMode('chat');
+  };
+
   const switchMode = (mode: CreativeMode) => {
     setSession(prev => ({ ...prev, currentMode: mode }));
     setIsSidebarOpen(false);
+    
+    // Automatically switch to canvas for collaborative modes
+    if (mode === CreativeMode.SCRIPT || mode === CreativeMode.STORY) {
+        setViewMode('canvas');
+    } else {
+        setViewMode('chat');
+    }
+  };
+
+  const resetSession = () => {
+    setSession({ id: uuidv4(), title: 'New Creative Session', messages: [], currentMode: CreativeMode.GENERAL, canvasContent: '' });
+    setIsSidebarOpen(false);
     setViewMode('chat');
+    setIsProfileMenuOpen(false);
+    setPendingRefinement(null);
   };
 
   const ModeButton = ({ mode, icon, label, description }: { mode: CreativeMode, icon: string, label: string, description: string }) => (
@@ -148,30 +196,13 @@ const App: React.FC = () => {
     </button>
   );
 
-  if (authLoading) {
-    return (
-      <div className="h-screen w-full flex items-center justify-center bg-[#070b14]">
-        <div className="w-12 h-12 rounded-xl creative-gradient animate-spin flex items-center justify-center">
-          <div className="w-8 h-8 bg-[#070b14] rounded-lg"></div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <Login />;
-  }
-
   const hasHistory = session.messages.length > 0;
-  const generatedAssets = session.messages.filter(m => m.imageUrl);
+  const isCollaborationActive = session.currentMode === CreativeMode.SCRIPT || session.currentMode === CreativeMode.STORY;
 
   return (
     <div className="flex h-screen bg-[#070b14] text-slate-200 overflow-hidden">
       {isSidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden"
-          onClick={() => setIsSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)} />
       )}
 
       <aside className={`fixed lg:relative z-50 h-full w-[300px] bg-[#0f121d] border-r border-slate-800/50 transition-transform duration-300 lg:translate-x-0 ${
@@ -184,194 +215,118 @@ const App: React.FC = () => {
             </div>
             <div>
               <h1 className="font-extrabold text-lg tracking-tight text-white">MOVA AI</h1>
-              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-[0.2em]">Creative Studio</span>
+              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-[0.2em]">Studio Pro</span>
             </div>
           </div>
 
-          <div className="flex flex-col gap-2.5 flex-grow overflow-y-auto pr-1">
-            <h2 className="px-2 mb-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Capabilities</h2>
-            <ModeButton mode={CreativeMode.GENERAL} icon="fa-compass" label="Explore" description="Universal creative assistant" />
-            <ModeButton mode={CreativeMode.IMAGE_PROMPT} icon="fa-wand-magic-sparkles" label="Image Studio" description="High-impact text-to-image" />
-            <ModeButton mode={CreativeMode.SONG} icon="fa-music" label="Songwriting" description="Lyrics & performance cues" />
-            <ModeButton mode={CreativeMode.SCRIPT} icon="fa-film" label="Script Mode" description="TikTok, Reels & Cinema" />
-            <ModeButton mode={CreativeMode.STORY} icon="fa-book-open" label="Storyteller" description="Deep emotional narratives" />
-            <ModeButton mode={CreativeMode.QA} icon="fa-lightbulb" label="Analytical" description="Business & Education logic" />
+          <div className="flex flex-col gap-2.5 flex-grow overflow-y-auto pr-1 custom-scrollbar">
+            <h2 className="px-2 mb-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Workspace</h2>
+            <ModeButton mode={CreativeMode.GENERAL} icon="fa-compass" label="Brainstorm" description="Quick ideas & research" />
+            <ModeButton mode={CreativeMode.IMAGE_PROMPT} icon="fa-wand-magic-sparkles" label="Visuals" description="AI Image generation" />
+            <ModeButton mode={CreativeMode.SCRIPT} icon="fa-film" label="Scriptwriter" description="Collaborative screenplay" />
+            <ModeButton mode={CreativeMode.STORY} icon="fa-book-open" label="Novelist" description="Long-form storytelling" />
+            <ModeButton mode={CreativeMode.SONG} icon="fa-music" label="Songwriter" description="Lyrics & composition" />
+            <ModeButton mode={CreativeMode.QA} icon="fa-lightbulb" label="Analytic" description="Logic & business data" />
           </div>
 
           <div className="mt-auto pt-6 border-t border-slate-800/50">
-            <button 
-              onClick={() => {
-                setSession({ id: uuidv4(), title: 'New Creative Session', messages: [], currentMode: CreativeMode.GENERAL });
-                setIsSidebarOpen(false);
-                setViewMode('chat');
-              }}
-              className="w-full py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold transition-all mb-4 border border-slate-700/50"
-            >
-              <i className="fa-solid fa-plus mr-2 text-indigo-400"></i> Reset Session
+            <button onClick={resetSession} className="w-full py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold transition-all mb-4 border border-slate-700/50">
+              <i className="fa-solid fa-plus mr-2 text-indigo-400"></i> New Project
             </button>
-            <div className="p-3 rounded-2xl bg-indigo-600/5 border border-indigo-500/10">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Engine Online</span>
-              </div>
-            </div>
           </div>
         </div>
       </aside>
 
       <main className="flex-grow flex flex-col relative h-full">
-        <header className="h-14 flex items-center justify-between px-6 z-30 border-b border-slate-800/20">
+        <header className="h-14 flex items-center justify-between px-6 z-30 border-b border-slate-800/20 bg-[#070b14]/50 backdrop-blur-md">
           <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setIsSidebarOpen(true)}
-              className="lg:hidden w-9 h-9 rounded-lg bg-slate-800/50 flex items-center justify-center text-slate-300 hover:bg-slate-800 transition-all"
-            >
+            <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden w-9 h-9 rounded-lg bg-slate-800/50 flex items-center justify-center text-slate-300">
               <i className="fa-solid fa-bars-staggered"></i>
             </button>
             {hasHistory && (
-              <div className="flex items-center gap-2">
-                 <button 
-                  onClick={() => setViewMode('chat')}
-                  className={`text-xs font-bold uppercase tracking-tighter px-3 py-1.5 rounded-lg transition-all ${viewMode === 'chat' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'text-slate-500 hover:text-slate-300'}`}
-                 >
-                    Chat
+              <div className="flex items-center gap-1 bg-slate-900/50 p-1 rounded-xl border border-slate-800/50">
+                 <button onClick={() => setViewMode('chat')} className={`text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-lg transition-all ${viewMode === 'chat' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:text-slate-300'}`}>
+                    CHAT
                  </button>
-                 <button 
-                  onClick={() => setViewMode('canvas')}
-                  className={`text-xs font-bold uppercase tracking-tighter px-3 py-1.5 rounded-lg transition-all ${viewMode === 'canvas' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'text-slate-500 hover:text-slate-300'}`}
-                 >
-                    Gallery
+                 {isCollaborationActive && (
+                    <button onClick={() => setViewMode('canvas')} className={`text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-lg transition-all ${viewMode === 'canvas' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:text-slate-300'}`}>
+                        CANVAS
+                    </button>
+                 )}
+                 <button onClick={() => setViewMode('gallery')} className={`text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-lg transition-all ${viewMode === 'gallery' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 hover:text-slate-300'}`}>
+                    GALLERY
                  </button>
               </div>
             )}
           </div>
-          <div className="flex items-center gap-3 relative">
-             <div className="hidden sm:flex px-3 py-1 rounded-full bg-slate-800/50 border border-slate-700/50 items-center gap-2">
-                <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">{session.currentMode}</span>
+          <div className="flex items-center gap-3">
+             <div className="hidden sm:flex px-3 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div>
+                <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">{session.currentMode}</span>
              </div>
-             <button 
-              onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-              className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700/50 overflow-hidden hover:border-indigo-500/50 transition-all"
-             >
-                {user.photoURL ? (
-                  <img src={user.photoURL} alt="Profile" className="w-full h-full object-cover" />
-                ) : (
-                  <i className="fa-solid fa-user text-xs text-slate-400"></i>
-                )}
+             <button onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)} className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700/50 flex items-center justify-center text-slate-400 hover:border-indigo-500/50 transition-all">
+                <i className="fa-solid fa-user-astronaut"></i>
              </button>
-
-             {isProfileMenuOpen && (
-               <>
-                 <div className="fixed inset-0 z-40" onClick={() => setIsProfileMenuOpen(false)}></div>
-                 <div className="absolute top-12 right-0 w-48 glass-panel border border-slate-800/50 rounded-2xl shadow-2xl z-50 p-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <div className="p-3 border-b border-slate-800/50 mb-1">
-                      <p className="text-xs font-bold text-white truncate">{user.displayName || 'Creator'}</p>
-                      <p className="text-[10px] text-slate-500 truncate">{user.email}</p>
-                    </div>
-                    <button 
-                      onClick={() => logout()}
-                      className="w-full p-3 rounded-xl flex items-center gap-3 text-red-400 hover:bg-red-400/10 transition-all text-xs font-bold uppercase tracking-widest"
-                    >
-                      <i className="fa-solid fa-arrow-right-from-bracket"></i> Sign Out
-                    </button>
-                 </div>
-               </>
-             )}
           </div>
         </header>
 
-        <div 
-          ref={scrollRef}
-          className="flex-grow overflow-y-auto"
-        >
+        <div ref={scrollRef} className="flex-grow overflow-hidden relative">
           {!hasHistory ? (
-            <div className="h-full flex flex-col items-center justify-center px-4 md:px-8 max-w-4xl mx-auto -mt-10 animate-in fade-in duration-1000">
-              <div className="text-center">
-                <div className="mb-8 w-20 h-20 rounded-3xl creative-gradient flex items-center justify-center shadow-2xl shadow-indigo-500/30 mx-auto transform rotate-12">
-                   <i className="fa-solid fa-bolt-lightning text-3xl text-white"></i>
+            <div className="h-full flex flex-col items-center justify-center px-4 -mt-10">
+              <div className="text-center animate-fade-in">
+                <div className="mb-8 w-24 h-24 rounded-[2rem] creative-gradient flex items-center justify-center shadow-2xl shadow-indigo-500/30 mx-auto transform rotate-6 hover:rotate-0 transition-transform duration-500">
+                   <i className="fa-solid fa-wand-sparkles text-4xl text-white"></i>
                 </div>
-                <h2 className="text-4xl md:text-6xl font-bold mb-3 tracking-tight">
-                  <span className="text-gradient drop-shadow-sm">{MOVA_WELCOME_GREETING}</span>
+                <h2 className="text-5xl md:text-7xl font-black mb-4 tracking-tighter">
+                  <span className="text-gradient">MOVA STUDIO</span>
                 </h2>
-                <h3 className="text-2xl md:text-4xl font-medium text-slate-500/80 tracking-tight">
-                  {MOVA_SUB_GREETING}
-                </h3>
-                <p className="mt-8 text-slate-500 text-sm max-w-md mx-auto leading-relaxed font-medium">
-                  Select a mode from the sidebar to start generating songs, scripts, stories, or stunning AI imagery.
+                <p className="text-slate-500 text-lg md:text-xl font-medium max-w-lg mx-auto leading-relaxed">
+                  The world's most advanced AI creative partner for scripts, stories, and visuals.
                 </p>
-                <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
-                   <button onClick={() => switchMode(CreativeMode.IMAGE_PROMPT)} className="p-4 bg-slate-800/40 border border-slate-700/50 rounded-2xl hover:bg-slate-800 transition-all text-left">
-                      <i className="fa-solid fa-image text-indigo-400 mb-2"></i>
-                      <div className="font-bold text-sm">Generate Images</div>
-                      <div className="text-[10px] text-slate-500 uppercase">Text to visual masterpiece</div>
-                   </button>
-                   <button onClick={() => switchMode(CreativeMode.SONG)} className="p-4 bg-slate-800/40 border border-slate-700/50 rounded-2xl hover:bg-slate-800 transition-all text-left">
-                      <i className="fa-solid fa-music text-purple-400 mb-2"></i>
-                      <div className="font-bold text-sm">Write a Song</div>
-                      <div className="text-[10px] text-slate-500 uppercase">Lyrics, mood & style</div>
-                   </button>
+                <div className="mt-12 flex flex-wrap justify-center gap-4">
+                    <button onClick={() => switchMode(CreativeMode.SCRIPT)} className="px-6 py-3 bg-slate-800 rounded-2xl border border-slate-700 hover:border-indigo-500/50 transition-all flex items-center gap-3">
+                        <i className="fa-solid fa-clapperboard text-orange-400"></i>
+                        <span className="font-bold text-sm">Start a Script</span>
+                    </button>
+                    <button onClick={() => switchMode(CreativeMode.STORY)} className="px-6 py-3 bg-slate-800 rounded-2xl border border-slate-700 hover:border-indigo-500/50 transition-all flex items-center gap-3">
+                        <i className="fa-solid fa-feather text-blue-400"></i>
+                        <span className="font-bold text-sm">Draft a Story</span>
+                    </button>
                 </div>
               </div>
             </div>
-          ) : viewMode === 'canvas' ? (
-            <div className="p-8 max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="flex items-center justify-between mb-8">
-                <div>
-                  <h2 className="text-2xl font-bold text-white">Creative Gallery</h2>
-                  <p className="text-slate-500 text-sm">All assets generated in this session</p>
-                </div>
-                <div className="text-xs font-bold text-slate-500 uppercase bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700/50">
-                  {generatedAssets.length} Productions
-                </div>
-              </div>
-
-              {generatedAssets.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-24 bg-slate-900/30 rounded-3xl border border-dashed border-slate-800">
-                  <div className="w-16 h-16 rounded-2xl bg-slate-800 flex items-center justify-center mb-6">
-                    <i className="fa-solid fa-wand-sparkles text-2xl text-slate-600"></i>
-                  </div>
-                  <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">No visual assets detected</p>
-                  <button onClick={() => switchMode(CreativeMode.IMAGE_PROMPT)} className="mt-4 px-6 py-2 bg-indigo-600/20 text-indigo-400 rounded-full text-xs font-bold border border-indigo-500/20 hover:bg-indigo-600/30 transition-all">
-                    Start Image Studio
-                  </button>
-                </div>
-              ) : (
+          ) : viewMode === 'canvas' && isCollaborationActive ? (
+            <CreativeCanvas 
+                content={session.canvasContent} 
+                mode={session.currentMode} 
+                onUpdate={(content) => setSession(s => ({ ...s, canvasContent: content }))}
+                onAction={handleCanvasAction}
+                isStreaming={isLoading}
+            />
+          ) : viewMode === 'gallery' ? (
+            <div className="p-8 max-w-6xl mx-auto h-full overflow-y-auto custom-scrollbar">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                  {generatedAssets.map((asset) => (
-                    <div key={asset.id} className="group relative aspect-square bg-[#0a0d17] rounded-3xl overflow-hidden border border-slate-800/50 shadow-2xl hover:scale-[1.03] transition-all duration-500">
-                      <img src={asset.imageUrl} alt="Generated Content" className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-500 flex flex-col justify-end p-6">
-                        <p className="text-xs text-slate-300 font-medium line-clamp-2 mb-4 drop-shadow-lg">{asset.content}</p>
-                        <div className="flex gap-2">
-                          <a href={asset.imageUrl} download={`mova-gen-${asset.id}.png`} className="flex-grow py-2.5 bg-white text-black rounded-xl flex items-center justify-center font-bold text-xs hover:bg-indigo-500 hover:text-white transition-all">
-                            <i className="fa-solid fa-download mr-2"></i> Save
-                          </a>
-                          <button onClick={() => { setViewMode('chat'); handleSendMessage(`Refine this visual: ${asset.content}`, { data: asset.imageUrl!, type: 'image/png' }); }} className="w-10 h-10 bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl flex items-center justify-center text-white hover:bg-indigo-600 transition-all">
-                            <i className="fa-solid fa-wand-magic-sparkles text-sm"></i>
-                          </button>
+                    {session.messages.filter(m => m.imageUrl).map((asset) => (
+                        <div key={asset.id} className="group relative aspect-square bg-[#0a0d17] rounded-3xl overflow-hidden border border-slate-800/50 shadow-2xl transition-all duration-500">
+                            <img src={asset.imageUrl} alt="Generated Asset" className="w-full h-full object-cover" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-500 flex flex-col justify-end p-6">
+                                <button onClick={() => handleRefineAction(asset.imageUrl!)} className="w-full py-3 bg-white text-black rounded-xl font-black text-[10px] tracking-widest uppercase hover:bg-indigo-500 hover:text-white transition-all">
+                                    REFINE ASSET
+                                </button>
+                            </div>
                         </div>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
                 </div>
-              )}
             </div>
           ) : (
-            <div className="p-4 md:p-8 space-y-6 max-w-4xl mx-auto pb-40">
+            <div className="h-full overflow-y-auto custom-scrollbar p-4 md:p-8 space-y-8 max-w-4xl mx-auto pb-40">
               {session.messages.map((msg) => (
-                <ChatMessage key={msg.id} message={msg} />
+                <ChatMessage key={msg.id} message={msg} onRefine={handleRefineAction} />
               ))}
-              {isLoading && session.messages[session.messages.length - 1]?.role === 'user' && (
-                <div className="flex gap-4 animate-pulse mb-10">
-                  <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center flex-shrink-0 border border-slate-700/50">
+              {isLoading && (
+                <div className="flex gap-4 animate-pulse">
+                  <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center border border-slate-700/50">
                     <i className="fa-solid fa-circle-notch fa-spin text-indigo-400 text-xs"></i>
-                  </div>
-                  <div className="flex-grow max-w-[180px] bg-slate-800/30 h-12 rounded-2xl rounded-tl-none border border-slate-800/50 flex items-center px-4">
-                     <div className="flex gap-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-slate-600 animate-bounce"></div>
-                        <div className="w-1.5 h-1.5 rounded-full bg-slate-600 animate-bounce delay-150"></div>
-                        <div className="w-1.5 h-1.5 rounded-full bg-slate-600 animate-bounce delay-300"></div>
-                     </div>
                   </div>
                 </div>
               )}
@@ -379,16 +334,24 @@ const App: React.FC = () => {
           )}
         </div>
 
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[#070b14] via-[#070b14] to-transparent pt-12 pb-2 px-4 pointer-events-none">
-           <div className="pointer-events-auto">
+        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[#070b14] via-[#070b14] to-transparent pt-12 pb-6 px-4 z-40">
+           <div className="max-w-4xl mx-auto">
              <ChatInput 
-              onSendMessage={(text, att) => handleSendMessage(text, att)} 
+              onSendMessage={handleSendMessage} 
               isLoading={isLoading} 
               currentMode={session.currentMode} 
+              externalAttachment={pendingRefinement}
+              onClearAttachment={() => setPendingRefinement(null)}
             />
            </div>
         </div>
       </main>
+
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+      `}</style>
     </div>
   );
 };

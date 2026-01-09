@@ -5,19 +5,36 @@ interface ChatInputProps {
   onSendMessage: (text: string, attachment?: { data: string, type: string }) => void;
   isLoading: boolean;
   currentMode: CreativeMode;
+  externalAttachment?: { data: string, type: string } | null;
+  onClearAttachment?: () => void;
 }
 
-const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, currentMode }) => {
+const ChatInput: React.FC<ChatInputProps> = ({ 
+  onSendMessage, 
+  isLoading, 
+  currentMode, 
+  externalAttachment,
+  onClearAttachment
+}) => {
   const [text, setText] = useState('');
-  const [attachment, setAttachment] = useState<{ data: string, type: string } | null>(null);
+  const [internalAttachment, setInternalAttachment] = useState<{ data: string, type: string } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Synchronize internal state with external prop
+  useEffect(() => {
+    if (externalAttachment) {
+      setInternalAttachment(externalAttachment);
+      textareaRef.current?.focus();
+    }
+  }, [externalAttachment]);
+
   const handleSend = () => {
-    if ((text.trim() || attachment) && !isLoading) {
-      onSendMessage(text.trim(), attachment || undefined);
+    if ((text.trim() || internalAttachment) && !isLoading) {
+      onSendMessage(text.trim(), internalAttachment || undefined);
       setText('');
-      setAttachment(null);
+      setInternalAttachment(null);
+      onClearAttachment?.();
     }
   };
 
@@ -33,13 +50,20 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, current
     if (file) {
       const reader = new FileReader();
       reader.onload = (event) => {
-        setAttachment({
+        setInternalAttachment({
           data: event.target?.result as string,
           type: file.type
         });
       };
       reader.readAsDataURL(file);
     }
+    // Reset input so same file can be selected again
+    e.target.value = '';
+  };
+
+  const clearAttachment = () => {
+    setInternalAttachment(null);
+    onClearAttachment?.();
   };
 
   useEffect(() => {
@@ -50,6 +74,7 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, current
   }, [text]);
 
   const getPlaceholder = () => {
+    if (internalAttachment) return "Describe the changes you want to make to this image...";
     switch (currentMode) {
       case CreativeMode.SONG: return "Write a soulful afrobeat song about...";
       case CreativeMode.SCRIPT: return "Create a viral TikTok script for...";
@@ -62,16 +87,19 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, current
 
   return (
     <div className="max-w-4xl mx-auto w-full relative group">
-      {attachment && (
+      {internalAttachment && (
         <div className="absolute bottom-full mb-4 left-0 animate-in slide-in-from-bottom-2 duration-300">
           <div className="relative inline-block">
             <img 
-              src={attachment.data} 
+              src={internalAttachment.data} 
               alt="Preview" 
               className="w-24 h-24 object-cover rounded-2xl border-2 border-indigo-500 shadow-2xl shadow-indigo-500/20" 
             />
+            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-indigo-600 text-[8px] font-black text-white px-2 py-0.5 rounded-full whitespace-nowrap uppercase tracking-widest shadow-lg">
+              Editing Mode
+            </div>
             <button 
-              onClick={() => setAttachment(null)}
+              onClick={clearAttachment}
               className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow-lg hover:bg-red-600 transition-colors"
             >
               <i className="fa-solid fa-xmark"></i>
@@ -108,9 +136,9 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, current
         
         <button
           onClick={handleSend}
-          disabled={(!text.trim() && !attachment) || isLoading}
+          disabled={(!text.trim() && !internalAttachment) || isLoading}
           className={`w-12 h-12 flex-shrink-0 flex items-center justify-center rounded-full transition-all mb-0.5 ${
-            (text.trim() || attachment) && !isLoading
+            (text.trim() || internalAttachment) && !isLoading
               ? 'creative-gradient text-white shadow-lg shadow-indigo-500/40 hover:scale-105 active:scale-95'
               : 'bg-slate-800 text-slate-600 cursor-not-allowed'
           }`}
@@ -121,17 +149,6 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading, current
             <i className="fa-solid fa-arrow-up text-lg"></i>
           )}
         </button>
-      </div>
-      
-      <div className="flex justify-center mt-3 gap-4">
-        <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest flex items-center gap-1.5">
-          <span className="w-1 h-1 rounded-full bg-slate-600"></span>
-          MOVA AI Pro Engine
-        </p>
-        <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest flex items-center gap-1.5">
-          <span className="w-1 h-1 rounded-full bg-slate-600"></span>
-          Powered by Gemini 3
-        </p>
       </div>
     </div>
   );

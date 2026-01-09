@@ -15,7 +15,8 @@ export interface Message {
   mode: CreativeMode;
   timestamp: Date;
   imageUrl?: string;
-  attachmentUrl?: string; // For user uploaded images
+  attachmentUrl?: string;
+  isDocumentUpdate?: boolean; // Flag to indicate if this message updated the canvas
 }
 
 export interface ChatSession {
@@ -23,4 +24,5 @@ export interface ChatSession {
   title: string;
   messages: Message[];
   currentMode: CreativeMode;
+  canvasContent: string; // The shared document state
 }
