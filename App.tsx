@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { CreativeMode, Message, ChatSession } from './types';
 import ChatMessage from './components/ChatMessage';
@@ -18,7 +19,8 @@ declare global {
 
   interface Window {
     Canva: any;
-    aistudio: AIStudio;
+    // Fix: Make aistudio optional to match potential pre-existing definitions and avoid modifier mismatch
+    aistudio?: AIStudio;
   }
 }
 
@@ -182,11 +184,12 @@ const App: React.FC = () => {
 
   const handleSendMessage = async (text: string, attachment?: { data: string, type: string }, quality: number = 2) => {
     if ((session.currentMode === CreativeMode.IMAGE_PROMPT || attachment) && quality >= 3) {
-      const hasKey = await window.aistudio.hasSelectedApiKey();
+      // Fix: Add optional chaining for window.aistudio and handle missing API key selection UI
+      const hasKey = await window.aistudio?.hasSelectedApiKey();
       if (!hasKey) {
         const confirmMsg = "High-quality (2K/4K) generation requires a paid API key. Select your key now?";
         if (window.confirm(confirmMsg)) {
-          await window.aistudio.openSelectKey();
+          await window.aistudio?.openSelectKey();
         } else {
           quality = 2;
         }
@@ -255,9 +258,10 @@ const App: React.FC = () => {
       }
     } catch (error: any) {
       console.error('Error:', error);
+      // Fix: Use optional chaining for openSelectKey in error handler
       if (error.message && error.message.includes("Requested entity was not found")) {
         alert("API Key error. Please re-select your key.");
-        await window.aistudio.openSelectKey();
+        await window.aistudio?.openSelectKey();
       }
       setSession(prev => ({
         ...prev,

@@ -41,10 +41,11 @@ Current Mode: {{MODE}}
 
 export async function generateMovaContent(prompt: string, mode: CreativeMode, history: any[]) {
   // Create a fresh instance right before making an API call to ensure latest API key is used
-  // Guideline: Use process.env.API_KEY directly
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const chat = ai.chats.create({
     model: 'gemini-3-flash-preview',
+    // Fix: Pass history to maintain conversation context
+    history: history,
     config: {
       systemInstruction: SYSTEM_INSTRUCTIONS.replace('{{MODE}}', mode),
     },
@@ -56,10 +57,11 @@ export async function generateMovaContent(prompt: string, mode: CreativeMode, hi
 
 export async function streamMovaContent(prompt: string, mode: CreativeMode, history: any[]) {
   // Create a fresh instance right before making an API call to ensure latest API key is used
-  // Guideline: Use process.env.API_KEY directly
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const chat = ai.chats.create({
     model: 'gemini-3-flash-preview',
+    // Fix: Pass history to maintain conversation context
+    history: history,
     config: {
       systemInstruction: SYSTEM_INSTRUCTIONS.replace('{{MODE}}', mode),
     },
@@ -70,7 +72,6 @@ export async function streamMovaContent(prompt: string, mode: CreativeMode, hist
 
 export async function generateMovaImage(prompt: string, base64Image?: string, mimeType?: string, qualityLevel: number = 2) {
   // Create a fresh instance right before making an API call to ensure latest API key is used
-  // Guideline: Always use ai as variable name and use process.env.API_KEY directly
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   // Quality Level Logic:
