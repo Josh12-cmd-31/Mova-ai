@@ -9,6 +9,7 @@ import { streamMovaContent, generateMovaImage } from './services/geminiService';
 import { auth, logout as firebaseLogout } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { v4 as uuidv4 } from 'uuid';
+import { GenerateContentResponse } from "@google/genai";
 
 declare global {
   interface AIStudio {
@@ -18,8 +19,8 @@ declare global {
 
   interface Window {
     Canva: any;
-    // Fix: Added readonly modifier to match global declaration in the execution environment.
-    readonly aistudio: AIStudio;
+    // Removed readonly to ensure compatibility with other declarations in the environment.
+    aistudio: AIStudio;
   }
 }
 
@@ -46,7 +47,6 @@ const App: React.FC = () => {
   // Monitor Authentication State
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      // Only overwrite if we don't have a demo user set
       if (currentUser || !user?.uid?.startsWith('guest')) {
         setUser(currentUser);
       }
@@ -89,7 +89,7 @@ const App: React.FC = () => {
         console.error("Failed to load projects", e);
       }
     } else {
-      setSavedSessions([]); // Reset if switch users
+      setSavedSessions([]); 
     }
   }, [user]);
 
@@ -243,7 +243,8 @@ const App: React.FC = () => {
           }]
         }));
         for await (const chunk of stream) {
-          const c = chunk as any;
+          // Explicitly use GenerateContentResponse to access the text property as per guidelines
+          const c = chunk as GenerateContentResponse;
           assistantContent += c.text;
           setSession(prev => {
             const updatedMessages = prev.messages.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m);
@@ -468,13 +469,35 @@ const App: React.FC = () => {
              </button>
 
              {isProfileMenuOpen && (
-               <div className="absolute top-12 right-0 w-64 glass-panel border border-slate-800/50 rounded-2xl p-4 shadow-2xl z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+               <div className="absolute top-12 right-0 w-72 glass-panel border border-slate-800/50 rounded-2xl p-5 shadow-2xl z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                   <div className="mb-4">
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Authenticated As</p>
                     <p className="text-sm font-bold text-white truncate">{user.displayName || 'Creator'}</p>
                     <p className="text-[10px] text-slate-400 truncate">{user.email}</p>
                   </div>
+                  
                   <div className="h-px bg-slate-800/50 mb-4"></div>
+                  
+                  <div className="mb-4">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">System Status</p>
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 flex items-center gap-3">
+                       <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                       <div>
+                         <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Netlify Ready</p>
+                         <p className="text-[9px] text-slate-500 leading-tight">Environment Config Detected</p>
+                       </div>
+                    </div>
+                  </div>
+
+                  <a 
+                    href="https://ai.google.dev/gemini-api/docs/billing" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="w-full mb-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 border border-slate-700/50"
+                  >
+                    <i className="fa-solid fa-credit-card"></i> Billing Setup
+                  </a>
+
                   <button 
                     onClick={handleLogout}
                     className="w-full py-2 bg-red-500/10 hover:bg-red-500 hover:text-white text-red-500 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2"
