@@ -2,7 +2,11 @@
 import React, { useState } from 'react';
 import { loginWithGoogle } from '../services/firebase';
 
-const Login: React.FC = () => {
+interface LoginProps {
+  onGuestLogin?: (user: any) => void;
+}
+
+const Login: React.FC<LoginProps> = ({ onGuestLogin }) => {
   const [error, setError] = useState<{ message: string; domain?: string } | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
@@ -13,7 +17,6 @@ const Login: React.FC = () => {
       await loginWithGoogle();
     } catch (err: any) {
       console.error(err);
-      // Specifically handle unauthorized domain error to help the user configure Firebase
       if (err.code === 'auth/unauthorized-domain') {
         setError({
           message: "Domain Authorization Required",
@@ -24,6 +27,17 @@ const Login: React.FC = () => {
       }
     } finally {
       setIsLoggingIn(false);
+    }
+  };
+
+  const handleDemoMode = () => {
+    if (onGuestLogin) {
+      onGuestLogin({
+        uid: 'guest-creator-' + Math.random().toString(36).substr(2, 9),
+        displayName: 'Guest Creator',
+        email: 'guest@mova.ai',
+        photoURL: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Mova'
+      });
     }
   };
 
@@ -56,13 +70,35 @@ const Login: React.FC = () => {
               Continue with Google
             </button>
 
+            <button 
+              onClick={handleDemoMode}
+              className="w-full py-3 px-6 bg-slate-800/50 text-slate-300 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-slate-800 transition-all border border-slate-700/50"
+            >
+              <i className="fa-solid fa-user-secret text-sm"></i>
+              Enter as Guest (Demo Mode)
+            </button>
+
             {error && (
               <div className="mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl animate-in fade-in zoom-in-95 duration-300">
-                <p className="text-red-400 text-xs font-bold uppercase tracking-widest mb-2">{error.message}</p>
+                <div className="flex items-center gap-2 mb-2">
+                  <i className="fa-solid fa-circle-exclamation text-red-400 text-[10px]"></i>
+                  <p className="text-red-400 text-[10px] font-black uppercase tracking-widest">{error.message}</p>
+                </div>
                 {error.domain ? (
-                  <p className="text-slate-400 text-[10px] leading-relaxed text-left">
-                    Please add <code className="text-indigo-400 font-mono bg-indigo-400/10 px-1 rounded mx-0.5">{error.domain}</code> to the <span className="text-slate-200">Authorized domains</span> list in your Firebase Console (Authentication > Settings).
-                  </p>
+                  <div className="text-left">
+                    <p className="text-slate-400 text-[10px] leading-relaxed mb-3">
+                      This domain isn't authorized in your Firebase Console yet. You can use <strong>Demo Mode</strong> above to start immediately, or add this domain:
+                    </p>
+                    <div className="bg-black/40 p-2 rounded-lg flex items-center justify-between border border-white/5">
+                      <code className="text-indigo-400 text-[10px] font-mono truncate">{error.domain}</code>
+                      <button 
+                        onClick={() => navigator.clipboard.writeText(error.domain!)}
+                        className="text-[10px] text-slate-500 hover:text-white transition-colors"
+                      >
+                        <i className="fa-solid fa-copy"></i>
+                      </button>
+                    </div>
+                  </div>
                 ) : (
                   <p className="text-slate-400 text-[10px] leading-relaxed">{error.message}</p>
                 )}

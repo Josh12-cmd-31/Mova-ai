@@ -1,12 +1,14 @@
+
 import React from 'react';
 import { Message, CreativeMode } from '../types';
 
 interface ChatMessageProps {
   message: Message;
   onRefine?: (imageUrl: string) => void;
+  onCanvaEdit?: (imageUrl: string) => void;
 }
 
-const ChatMessage: React.FC<ChatMessageProps> = ({ message, onRefine }) => {
+const ChatMessage: React.FC<ChatMessageProps> = ({ message, onRefine, onCanvaEdit }) => {
   const isAI = message.role === 'assistant';
 
   const formatContent = (text: string) => {
@@ -68,9 +70,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, onRefine }) => {
                     <i className="fa-solid fa-download"></i>
                   </a>
                   <button 
+                    onClick={() => onCanvaEdit?.(message.imageUrl!)}
+                    className="w-10 h-10 bg-[#00c4cc] backdrop-blur-xl border border-white/10 rounded-full flex items-center justify-center text-white hover:bg-[#00a9b0] transition-all"
+                    title="Edit with Canva"
+                  >
+                    <i className="fa-solid fa-paintbrush"></i>
+                  </button>
+                  <button 
                     onClick={() => onRefine?.(message.imageUrl!)}
                     className="w-10 h-10 bg-black/60 backdrop-blur-xl border border-white/10 rounded-full flex items-center justify-center text-white hover:bg-indigo-500 transition-all"
-                    title="Edit/Refine Image"
+                    title="Edit/Refine with MOVA AI"
                   >
                     <i className="fa-solid fa-wand-magic-sparkles"></i>
                   </button>
