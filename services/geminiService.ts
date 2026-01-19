@@ -30,21 +30,23 @@ MODES:
    - You are a visual production master.
    - If a reference image is provided, you are in EDITING MODE. 
    - Your goal is to apply the user's requested modifications while STRICTLY maintaining the composition, character identity, and core features of the original image.
-   - If no image is provided, you are in CREATION MODE. Generate a new visual based on the prompt.
-   - Format: [Main character/subject] + [action/scene] + [modified elements] + [lighting/style] + [high quality tags].
 
 5. Q&A MODE: 
    - Answer clearly, step-by-step with practical actions.
+
+6. CRITIQUE MODE (Feedback Master):
+   - You act as a professional editor, creative director, or master songwriter.
+   - Analyze the provided text for: Emotional Impact, Pacing, Originality, and Structure.
+   - Provide feedback in three parts: [Strengths], [Areas for Growth], and [Direct Suggestions].
+   - Be encouraging but radically honest.
 
 Current Mode: {{MODE}}
 `;
 
 export async function generateMovaContent(prompt: string, mode: CreativeMode, history: any[]) {
-  // Create a fresh instance right before making an API call to ensure latest API key is used
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const chat = ai.chats.create({
     model: 'gemini-3-flash-preview',
-    // Fix: Pass history to maintain conversation context
     history: history,
     config: {
       systemInstruction: SYSTEM_INSTRUCTIONS.replace('{{MODE}}', mode),
@@ -56,11 +58,9 @@ export async function generateMovaContent(prompt: string, mode: CreativeMode, hi
 }
 
 export async function streamMovaContent(prompt: string, mode: CreativeMode, history: any[]) {
-  // Create a fresh instance right before making an API call to ensure latest API key is used
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const chat = ai.chats.create({
     model: 'gemini-3-flash-preview',
-    // Fix: Pass history to maintain conversation context
     history: history,
     config: {
       systemInstruction: SYSTEM_INSTRUCTIONS.replace('{{MODE}}', mode),
@@ -71,14 +71,7 @@ export async function streamMovaContent(prompt: string, mode: CreativeMode, hist
 }
 
 export async function generateMovaImage(prompt: string, base64Image?: string, mimeType?: string, qualityLevel: number = 2) {
-  // Create a fresh instance right before making an API call to ensure latest API key is used
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
-  // Quality Level Logic:
-  // 1: Draft (Fast, Lower Detail)
-  // 2: Standard (Balanced)
-  // 3: Pro HD (Gemini 3 Pro 2K)
-  // 4: Ultra 4K (Gemini 3 Pro 4K)
   
   const isHighQuality = qualityLevel >= 3;
   const modelName = isHighQuality ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';

@@ -5,7 +5,8 @@ export enum CreativeMode {
   SCRIPT = 'SCRIPT',
   STORY = 'STORY',
   IMAGE_PROMPT = 'IMAGE_PROMPT',
-  QA = 'QA'
+  QA = 'QA',
+  CRITIQUE = 'CRITIQUE'
 }
 
 export interface Message {

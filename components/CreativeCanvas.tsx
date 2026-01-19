@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { CreativeMode } from '../types';
 
@@ -13,12 +14,9 @@ const CreativeCanvas: React.FC<CreativeCanvasProps> = ({ content, mode, onUpdate
   const [localContent, setLocalContent] = useState(content);
   const [selection, setSelection] = useState({ start: 0, end: 0, text: '' });
   const editorRef = useRef<HTMLTextAreaElement>(null);
-  // Fix: Use any instead of NodeJS.Timeout to avoid namespace errors in browser environments
   const debounceTimerRef = useRef<any>(null);
 
-  // Sync local content when remote content changes
   useEffect(() => {
-    // Only update if we aren't currently typing or if remote significantly changed
     if (content !== localContent) {
       setLocalContent(content);
     }
@@ -28,11 +26,10 @@ const CreativeCanvas: React.FC<CreativeCanvasProps> = ({ content, mode, onUpdate
     const newVal = e.target.value;
     setLocalContent(newVal);
 
-    // Debounce the update to Firestore
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     debounceTimerRef.current = setTimeout(() => {
       onUpdate(newVal);
-    }, 500); // 500ms delay to bundle keystrokes
+    }, 500);
   };
 
   const handleSelection = () => {
@@ -78,12 +75,23 @@ const CreativeCanvas: React.FC<CreativeCanvasProps> = ({ content, mode, onUpdate
               </button>
             </div>
           )}
-          <button 
-            onClick={() => onAction('CONTINUE', localContent)}
-            className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-indigo-600/20"
-          >
-            <i className="fa-solid fa-wand-sparkles mr-2"></i> CONTINUE
-          </button>
+          
+          <div className="flex items-center gap-1.5 bg-slate-900/50 p-1 rounded-xl border border-slate-800/50 ml-2">
+            <button 
+              onClick={() => onAction('CRITIQUE', localContent)}
+              disabled={!localContent.trim() || isStreaming}
+              className="px-4 py-1.5 bg-purple-600/20 hover:bg-purple-600 text-purple-400 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-30"
+            >
+              <i className="fa-solid fa-comment-medical mr-2"></i> CRITIQUE
+            </button>
+            <button 
+              onClick={() => onAction('CONTINUE', localContent)}
+              disabled={isStreaming}
+              className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/20 disabled:opacity-30"
+            >
+              <i className="fa-solid fa-wand-sparkles mr-2"></i> CONTINUE
+            </button>
+          </div>
         </div>
       </div>
 
@@ -92,7 +100,7 @@ const CreativeCanvas: React.FC<CreativeCanvasProps> = ({ content, mode, onUpdate
           {isStreaming && (
             <div className="absolute top-8 right-12 flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-full animate-pulse z-10">
               <div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div>
-              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">MOVA is composing...</span>
+              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">MOVA is thinking...</span>
             </div>
           )}
           

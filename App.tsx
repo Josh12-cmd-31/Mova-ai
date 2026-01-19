@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { CreativeMode, Message, ChatSession } from './types';
 import ChatMessage from './components/ChatMessage';
@@ -7,7 +8,7 @@ import Login from './components/Login';
 import { streamMovaContent, generateMovaImage } from './services/geminiService';
 import { auth, db, logout as firebaseLogout } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, onSnapshot, setDoc, updateDoc, collection, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { v4 as uuidv4 } from 'uuid';
 import { GenerateContentResponse } from "@google/genai";
 
@@ -23,6 +24,22 @@ declare global {
   }
 }
 
+const sanitizeForFirestore = (data: any): any => {
+  if (Array.isArray(data)) {
+    return data.map(sanitizeForFirestore);
+  } else if (data !== null && typeof data === 'object' && !(data instanceof Date)) {
+    const sanitized: any = {};
+    Object.keys(data).forEach((key) => {
+      const value = data[key];
+      if (value !== undefined) {
+        sanitized[key] = sanitizeForFirestore(value);
+      }
+    });
+    return sanitized;
+  }
+  return data;
+};
+
 const App: React.FC = () => {
   const [user, setUser] = useState<User | any | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -33,20 +50,16 @@ const App: React.FC = () => {
     currentMode: CreativeMode.GENERAL,
     canvasContent: ''
   });
-  const [savedSessions, setSavedSessions] = useState<ChatSession[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'chat' | 'canvas' | 'gallery'>('chat');
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [pendingRefinement, setPendingRefinement] = useState<{ data: string, type: string } | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'idle'>('idle');
   
   const scrollRef = useRef<HTMLDivElement>(null);
-  const canvaApiRef = useRef<any>(null);
   const skipNextSyncRef = useRef(false);
 
-  // Monitor Authentication State
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -55,7 +68,6 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Real-time Collaboration Listener
   useEffect(() => {
     if (!user || !session.id) return;
 
@@ -65,14 +77,12 @@ const App: React.FC = () => {
       if (snapshot.exists()) {
         const data = snapshot.data() as any;
         
-        // Convert timestamp strings back to Dates if necessary
         const remoteMessages = (data.messages || []).map((m: any) => ({
           ...m,
           timestamp: m.timestamp?.toDate ? m.timestamp.toDate() : new Date(m.timestamp)
         }));
 
         setSession(prev => {
-          // Check if we should ignore this update (if we just pushed it)
           if (skipNextSyncRef.current) {
             skipNextSyncRef.current = false;
             return prev;
@@ -88,33 +98,31 @@ const App: React.FC = () => {
         });
         setSyncStatus('synced');
       } else {
-        // If doc doesn't exist yet, we initialize it
-        setDoc(sessionDocRef, {
+        setDoc(sessionDocRef, sanitizeForFirestore({
           id: session.id,
           title: session.title,
           currentMode: session.currentMode,
-          canvasContent: session.canvasContent,
+          canvasContent: session.canvasContent || '',
           messages: [],
           createdAt: new Date(),
           ownerId: user.uid
-        });
+        }));
       }
     });
 
     return () => unsubscribe();
   }, [session.id, user]);
 
-  // Push Canvas Updates to Firestore (Shared)
   const syncCanvasToCloud = async (newContent: string) => {
     if (!user || !session.id) return;
     setSyncStatus('syncing');
     try {
       const sessionDocRef = doc(db, 'sessions', session.id);
       skipNextSyncRef.current = true;
-      await updateDoc(sessionDocRef, {
-        canvasContent: newContent,
+      await updateDoc(sessionDocRef, sanitizeForFirestore({
+        canvasContent: newContent || '',
         lastModified: new Date()
-      });
+      }));
       setSyncStatus('synced');
     } catch (err) {
       console.error("Cloud Sync Error:", err);
@@ -122,7 +130,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Check URL for shared session
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sharedId = params.get('session');
@@ -134,61 +141,60 @@ const App: React.FC = () => {
   const handleCopyShareLink = () => {
     const url = `${window.location.origin}${window.location.pathname}?session=${session.id}`;
     navigator.clipboard.writeText(url);
-    alert("Collaboration link copied to clipboard! Share this with your team.");
+    alert("Collaboration link copied to clipboard!");
   };
 
-  const handleSendMessage = async (text: string, attachment?: { data: string, type: string }, quality: number = 2) => {
+  const handleSendMessage = async (text: string, attachment?: { data: string, type: string }, quality: number = 2, overrideMode?: CreativeMode) => {
     if (!user) return;
+
+    const targetMode = overrideMode || session.currentMode;
 
     const userMessage: Message = {
       id: uuidv4(),
       role: 'user',
       content: text || (attachment ? "Refine this image..." : ""),
-      mode: session.currentMode,
+      mode: targetMode,
       timestamp: new Date(),
-      attachmentUrl: attachment?.data
+      attachmentUrl: attachment?.data || undefined
     };
     
-    // Optimistic local update
     const updatedMessages = [...session.messages, userMessage];
     setSession(prev => ({ ...prev, messages: updatedMessages }));
     
-    // Sync user message to cloud
     const sessionDocRef = doc(db, 'sessions', session.id);
-    await updateDoc(sessionDocRef, { messages: updatedMessages });
+    await updateDoc(sessionDocRef, sanitizeForFirestore({ messages: updatedMessages }));
 
     setIsLoading(true);
     setPendingRefinement(null);
 
     try {
-      if (session.currentMode === CreativeMode.IMAGE_PROMPT || attachment) {
+      if (targetMode === CreativeMode.IMAGE_PROMPT || attachment) {
         const result = await generateMovaImage(text || "Enhance visual.", attachment?.data, attachment?.type || 'image/png', quality);
         const assistantMsg: Message = {
           id: uuidv4(),
           role: 'assistant',
           content: result.textContent || "Refinement complete.",
-          imageUrl: result.imageUrl,
-          mode: session.currentMode,
+          imageUrl: result.imageUrl || undefined,
+          mode: targetMode,
           timestamp: new Date()
         };
         const finalMessages = [...updatedMessages, assistantMsg];
-        await updateDoc(sessionDocRef, { messages: finalMessages });
+        await updateDoc(sessionDocRef, sanitizeForFirestore({ messages: finalMessages }));
       } else {
         const history = updatedMessages.map(m => ({
           role: m.role === 'assistant' ? 'model' : 'user',
           parts: [{ text: m.content }]
         }));
         
-        const stream = await streamMovaContent(text, session.currentMode, history);
+        const stream = await streamMovaContent(text, targetMode, history);
         const assistantId = uuidv4();
         let assistantContent = '';
         
-        // Placeholder for streaming
         const streamingMessages = [...updatedMessages, {
           id: assistantId,
           role: 'assistant' as const,
           content: '',
-          mode: session.currentMode,
+          mode: targetMode,
           timestamp: new Date()
         }];
         setSession(prev => ({ ...prev, messages: streamingMessages }));
@@ -203,15 +209,14 @@ const App: React.FC = () => {
           });
         }
         
-        // Final sync of the complete assistant message
         const finalAssistantMsg: Message = {
           id: assistantId,
           role: 'assistant',
           content: assistantContent,
-          mode: session.currentMode,
+          mode: targetMode,
           timestamp: new Date()
         };
-        await updateDoc(sessionDocRef, { messages: [...updatedMessages, finalAssistantMsg] });
+        await updateDoc(sessionDocRef, sanitizeForFirestore({ messages: [...updatedMessages, finalAssistantMsg] }));
       }
     } catch (error: any) {
       console.error('Error:', error);
@@ -219,10 +224,10 @@ const App: React.FC = () => {
         id: uuidv4(),
         role: 'assistant',
         content: `Error: ${error.message}`,
-        mode: session.currentMode,
+        mode: targetMode,
         timestamp: new Date()
       };
-      await updateDoc(sessionDocRef, { messages: [...updatedMessages, errorMsg] });
+      await updateDoc(sessionDocRef, sanitizeForFirestore({ messages: [...updatedMessages, errorMsg] }));
     } finally {
       setIsLoading(false);
     }
@@ -230,12 +235,18 @@ const App: React.FC = () => {
 
   const handleCanvasAction = (action: string, context: string) => {
     let prompt = "";
+    let mode = session.currentMode;
     switch(action) {
         case 'REWRITE': prompt = `Rewrite this section dramatically: "${context}"`; break;
         case 'EXPAND': prompt = `Expand with more detail: "${context}"`; break;
-        case 'CONTINUE': prompt = `Continue the composition.`; break;
+        case 'CONTINUE': prompt = `Continue the composition based on the current context.`; break;
+        case 'CRITIQUE': 
+            prompt = `I need a professional review of my work. Here is the text:\n\n"${context}"\n\nPlease provide detailed feedback on impact, structure, and pacing.`;
+            mode = CreativeMode.CRITIQUE;
+            setViewMode('chat');
+            break;
     }
-    handleSendMessage(prompt);
+    handleSendMessage(prompt, undefined, 2, mode);
   };
 
   const handleRefineAction = (imageUrl: string) => {
@@ -247,7 +258,7 @@ const App: React.FC = () => {
     setSession(prev => ({ ...prev, currentMode: mode }));
     setIsSidebarOpen(false);
     if (user) {
-      await updateDoc(doc(db, 'sessions', session.id), { currentMode: mode });
+      await updateDoc(doc(db, 'sessions', session.id), sanitizeForFirestore({ currentMode: mode }));
     }
     if (mode === CreativeMode.SCRIPT || mode === CreativeMode.STORY) {
         setViewMode('canvas');
@@ -266,7 +277,6 @@ const App: React.FC = () => {
     setPendingRefinement(null);
   };
 
-  // Fix: Implemented handleLogout to resolve the error "Cannot find name handleLogout"
   const handleLogout = async () => {
     try {
       await firebaseLogout();
@@ -294,7 +304,7 @@ const App: React.FC = () => {
     return <Login onGuestLogin={setUser} />;
   }
 
-  const isCollaborationActive = session.currentMode === CreativeMode.SCRIPT || session.currentMode === CreativeMode.STORY;
+  const isCollaborationActive = session.currentMode === CreativeMode.SCRIPT || session.currentMode === CreativeMode.STORY || session.currentMode === CreativeMode.CRITIQUE;
 
   return (
     <div className="flex h-screen bg-[#070b14] text-slate-200 overflow-hidden">
@@ -324,6 +334,7 @@ const App: React.FC = () => {
               { m: CreativeMode.SCRIPT, i: 'fa-film', l: 'Scriptwriter', d: 'Collaborative' },
               { m: CreativeMode.STORY, i: 'fa-book-open', l: 'Novelist', d: 'Long-form' },
               { m: CreativeMode.SONG, i: 'fa-music', l: 'Songwriter', d: 'Lyrics' },
+              { m: CreativeMode.CRITIQUE, i: 'fa-comment-medical', l: 'Feedback', d: 'Expert Review' },
               { m: CreativeMode.QA, i: 'fa-lightbulb', l: 'Analytic', d: 'Logic' }
             ].map(({ m, i, l, d }) => (
               <button
