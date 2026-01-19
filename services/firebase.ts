@@ -1,8 +1,9 @@
+
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
 import { getAnalytics } from "firebase/analytics";
+import { getFirestore } from "firebase/firestore";
 
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyB4C0wLf_hGRuSBNZ_FzJyoWHEn8ti3ntM",
   authDomain: "mova-a6ec6.firebaseapp.com",
@@ -13,14 +14,12 @@ const firebaseConfig = {
   measurementId: "G-8MMSFTRB63"
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Services
 export const auth = getAuth(app);
+export const db = getFirestore(app);
 export const analytics = typeof window !== "undefined" ? getAnalytics(app) : null;
 export const googleProvider = new GoogleAuthProvider();
 
-// Auth Helper Functions
 export const loginWithGoogle = () => signInWithPopup(auth, googleProvider);
 export const logout = () => signOut(auth);

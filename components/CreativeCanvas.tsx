@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { CreativeMode } from '../types';
 
@@ -14,14 +13,26 @@ const CreativeCanvas: React.FC<CreativeCanvasProps> = ({ content, mode, onUpdate
   const [localContent, setLocalContent] = useState(content);
   const [selection, setSelection] = useState({ start: 0, end: 0, text: '' });
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  // Fix: Use any instead of NodeJS.Timeout to avoid namespace errors in browser environments
+  const debounceTimerRef = useRef<any>(null);
 
+  // Sync local content when remote content changes
   useEffect(() => {
-    setLocalContent(content);
+    // Only update if we aren't currently typing or if remote significantly changed
+    if (content !== localContent) {
+      setLocalContent(content);
+    }
   }, [content]);
 
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setLocalContent(e.target.value);
-    onUpdate(e.target.value);
+    const newVal = e.target.value;
+    setLocalContent(newVal);
+
+    // Debounce the update to Firestore
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      onUpdate(newVal);
+    }, 500); // 500ms delay to bundle keystrokes
   };
 
   const handleSelection = () => {
@@ -79,7 +90,7 @@ const CreativeCanvas: React.FC<CreativeCanvasProps> = ({ content, mode, onUpdate
       <div className="flex-grow relative p-8 md:p-12 overflow-y-auto custom-scrollbar">
         <div className="max-w-3xl mx-auto h-full">
           {isStreaming && (
-            <div className="absolute top-8 right-12 flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-full animate-pulse">
+            <div className="absolute top-8 right-12 flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-full animate-pulse z-10">
               <div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div>
               <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">MOVA is composing...</span>
             </div>
